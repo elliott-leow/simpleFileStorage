@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = { darkMode: 'class' };
+    </script>
+    <style>
+        /* Styles for Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(0, 0, 0, 0.6); /* Semi-transparent black */
+            backdrop-filter: blur(4px); /* Optional blur effect */
+            -webkit-backdrop-filter: blur(4px); /* Safari */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0s linear 0.3s;
+        }
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+            transition: opacity 0.3s ease;
+        }
+        .modal-content {
+            background-color: white; /* Light mode bg */
+            padding: 1.5rem; /* p-6 */
+            border-radius: 0.5rem; /* rounded-lg */
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); /* shadow-xl */
+            width: 90%;
+            max-width: 400px; /* Limit width */
+            transform: translateY(-20px) scale(0.95); /* Start slightly up and small */
+            transition: transform 0.3s ease;
+        }
+        .dark .modal-content {
+            background-color: #1f2937; /* gray-800 */
+        }
+        .modal-overlay.active .modal-content {
+            transform: translateY(0) scale(1); /* Animate to final position */
+        }
+        /* Lock icon styling */
+        .lock-icon { display: inline-block; width: 0.8em; height: 0.8em; margin-left: 0.3em; opacity: 0.6; vertical-align: baseline; flex-shrink: 0; }
+        /* Other styles */
+        li a:hover { transition: background-color 0.2s ease-in-out; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-gray-100 transition-colors duration-300 font-sans">
+<div class="max-w-4xl mx-auto p-4 sm:p-6">
+
+    <!-- Header: Title and Controls -->
+    <div class="flex justify-between items-center mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
+        <h1 class="text-2xl font-bold truncate" title="{{ title }}">{{ title }}</h1>
+        <div class="flex items-center space-x-2 flex-shrink-0">
+            <a href="/upload-ui" title="Upload File" aria-label="Upload File" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+            </a>
+            <button id="theme-toggle" aria-label="Toggle Dark Mode" class="p-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <span id="theme-icon">🌙</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Search Forms -->
+    <form id="search-form" class="mb-6 space-y-3 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
+        <!-- Row 1: Filename Filter -->
+        <div class="flex flex-wrap sm:flex-nowrap items-center gap-3">
+            <input id="search" name="search" type="text" placeholder="Filter by name..." value="{{ search_query }}" class="flex-grow p-2 border rounded bg-gray-50 dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-blue-500 focus:border-blue-500 min-w-0">
+            <label class="flex items-center space-x-2 whitespace-nowrap cursor-pointer">
+                <input id="recursive" name="recursive" type="checkbox" checked class="accent-blue-500 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                <span>Recursive</span>
+            </label>
+            <button type="submit" name="submit_filter" value="filter" class="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800">Filter</button>
+        </div>
+
+        <!-- Row 2: Semantic/Smart Search -->
+        {% if semantic_search_enabled %}
+        <div class="flex flex-wrap sm:flex-nowrap items-center gap-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+            <input id="smart-search" name="smart_query" type="text" placeholder="Smart search content..." value="{{ smart_query }}" class="flex-grow p-2 border rounded bg-gray-50 dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-purple-500 focus:border-purple-500 min-w-0">
+            <button type="submit" name="submit_smart" value="smart" class="w-full sm:w-auto px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800">Smart Search</button>
+        </div>
+        {% else %}
+        <div class="pt-3 border-t border-gray-200 dark:border-gray-700">
+            <p class="text-sm text-gray-500 dark:text-gray-400 italic">Smart search unavailable.</p>
+        </div>
+        {% endif %}
+
+        <!-- Row 3: Clear Search Button (Conditional) -->
+        {% if search_query or smart_query %}
+        <div class="pt-3 border-t border-gray-200 dark:border-gray-700 flex justify-end">
+             {# Construct the base URL for the current path #}
+             {% set base_url = '/' + current_path if current_path else '/' %}
+            <a href="{{ base_url }}" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800">
+                Clear Search & Show All
+            </a>
+        </div>
+        {% endif %}
+    </form>
+
+    <!-- Permission Denied Message -->
+     {% if permission_denied %}
+    <div class="p-4 mb-4 text-sm text-yellow-800 bg-yellow-100 rounded-lg dark:bg-gray-800 dark:text-yellow-400 border border-yellow-300 dark:border-yellow-600" role="alert">
+        <svg class="inline flex-shrink-0 mr-3 w-5 h-5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+        <span class="font-medium">Access Denied!</span> Cannot list contents of <code>/{{ current_path }}</code>. Authenticate by clicking the folder link (if visible) or navigate away.
+        {% if show_parent %}
+            <a href="{{ parent_url }}" class="ml-4 font-medium text-blue-600 dark:text-blue-400 hover:underline">Go to Parent</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+
+    <!-- File Listing -->
+    <ul id="file-list" class="space-y-1.5">
+        <!-- Parent Directory Link -->
+        {% if show_parent %}
+        <li>
+            <a href="{{ parent_url }}" class="flex items-center p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-blue-600 dark:text-blue-400">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                  <path fill-rule="evenodd" d="M12.707 14.707a1 1 0 01-1.414 0L7 10.414V17a1 1 0 11-2 0V7a1 1 0 011-1h10a1 1 0 110 2H8.414l4.293 4.293a1 1 0 010 1.414z" clip-rule="evenodd" />
+                </svg>
+                Parent directory
+            </a>
+        </li>
+        {% endif %}
+
+        <!-- Message: No Results Found -->
+        {% if not entries and (search_query or smart_query) and not permission_denied %}
+        <li class="p-3 text-center text-gray-500 dark:text-gray-400 italic">
+            No files found matching your search criteria.
+        </li>
+        <!-- Message: Directory Empty (and not root, not denied) -->
+        {% elif not entries and not show_parent and not permission_denied and current_path %}
+        <li class="p-3 text-center text-gray-500 dark:text-gray-400 italic">
+            Directory is empty.
+        </li>
+        {% endif %}
+
+        <!-- File/Folder Loop -->
+        {% for rel_path_key, info in entries.items() %}
+        <li class="bg-white dark:bg-gray-800 rounded-lg shadow-sm hover:shadow-md transition-shadow duration-150 ease-in-out"
+            data-name="{{ info.display_name|lower }}"
+            {% if info.is_protected %}data-protected="true"{% endif %}>
+
+            <div class="flex items-center justify-between p-3">
+                <!-- Left side: Icon, Name, Lock, Score -->
+                 {# Add class to link if it points to a protected directory for JS targeting #}
+                <a href="/{{ info.rel_path_encoded }}"
+                   class="flex items-center space-x-2 min-w-0 group {% if info.is_dir and info.is_protected %}protected-folder-link{% endif %}"
+                   title="/{{ info.rel_path }}">
+
+                    <!-- Icon -->
+                    <span class="text-xl flex-shrink-0 w-6 text-center">
+                        {% if info.is_dir %}
+                            {# Differentiate protected folder icon color #}
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 {% if info.is_protected %}text-orange-500{% else %}text-yellow-500{% endif %}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                            </svg>
+                        {% elif info.rel_path.lower().endswith('.pdf') %}
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+                        {% elif info.rel_path.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.webp', '.tiff', '.tif')) %}
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                        {% else %}
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" /></svg>
+                        {% endif %}
+                    </span>
+                    <!-- Display Name -->
+                    <span class="font-medium text-gray-800 dark:text-gray-100 group-hover:text-blue-600 dark:group-hover:text-blue-400 truncate folder-name">
+                        {{ info.display_name }}
+                    </span>
+
+                    <!-- Lock Icon for protected items -->
+                    {% if info.is_protected %}
+                    <span class="lock-icon text-gray-500 dark:text-gray-400" title="Protected - Requires Key">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-full w-full" viewBox="0 0 20 20" fill="currentColor">
+                          <path fill-rule="evenodd" d="M10 1a4.5 4.5 0 00-4.5 4.5V9H5a2 2 0 00-2 2v6a2 2 0 002 2h10a2 2 0 002-2v-6a2 2 0 00-2-2h-.5V5.5A4.5 4.5 0 0010 1zm3 8V5.5a3 3 0 10-6 0V9h6z" clip-rule="evenodd" />
+                        </svg>
+                    </span>
+                    {% endif %}
+
+                    <!-- Score (Smart Search Only) -->
+                    {% if info.score %}
+                    <span class="text-xs px-1.5 py-0.5 bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-200 rounded-full ml-1 flex-shrink-0">
+                        {{ info.score }}
+                    </span>
+                    {% endif %}
+
+                    <!-- *** NEW: Indicator for Name Match in Smart Search *** -->
+                    {% if is_smart_search_results and info.matched_name and not info.score %}
+                        {# Case: Only matched name in smart search #}
+                        <span class="text-xs px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-full ml-1 flex-shrink-0" title="Matched Name">
+                            Name
+                        </span>
+                    {% elif is_smart_search_results and info.matched_name and info.score %}
+                         {# Case: Matched both content and name #}
+                         <span class="text-xs px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 rounded-full ml-1 flex-shrink-0" title="Matched Content & Name">
+                            Both
+                        </span>
+                    {% endif %}
+                    <!-- *** End Name Match Indicator *** -->
+                </a>
+
+                <!-- Right side: Size & Date -->
+                <span class="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap flex-shrink-0 pl-3">
+                    {{ info.size }}<span class="mx-1">•</span>{{ info.mtime }}
+                </span>
+            </div>
+
+            <!-- Conditional Full Path (Shown during search results) -->
+            {% if search_query or smart_query %}
+            <div class="text-xs text-gray-500 dark:text-gray-400 px-3 pb-2 pl-12 truncate">
+                <span class="font-mono">/{{ info.rel_path }}</span>
+            </div>
+            {% endif %}
+        </li>
+        {% endfor %} {# End of file/folder loop #}
+    </ul>
+
+</div> <!-- End main container -->
+
+
+<!-- Access Key Modal HTML (Initially Hidden) -->
+<div id="accessKeyModal" class="modal-overlay">
+    <div class="modal-content">
+        <h3 class="text-lg font-medium leading-6 text-gray-900 dark:text-gray-100 mb-3" id="modalTitle">Enter Access Key</h3>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4" id="modalPathLabel"></p>
+        <div>
+            <label for="modalKeyInput" class="sr-only">Access Key</label>
+            <input type="password" name="modalKeyInput" id="modalKeyInput" autocomplete="current-password" class="block w-full p-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 focus:ring-blue-500 focus:border-blue-500 sm:text-sm" placeholder="API Key">
+        </div>
+        <div class="mt-2 text-sm text-red-600 dark:text-red-400 h-5" id="modalError" aria-live="assertive"></div> <!-- Error message area -->
+        <div class="mt-5 sm:mt-6 flex justify-end space-x-3">
+            <button type="button" id="modalCancelBtn" class="inline-flex justify-center rounded-md border border-gray-300 dark:border-gray-600 px-4 py-2 bg-white dark:bg-gray-700 text-base font-medium text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:focus:ring-offset-gray-800 sm:text-sm">
+                Cancel
+            </button>
+            <button type="button" id="modalSubmitBtn" class="inline-flex justify-center rounded-md border border-transparent px-4 py-2 bg-blue-600 text-base font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-800 sm:text-sm disabled:opacity-50">
+                Submit
+            </button>
+        </div>
+    </div>
+</div>
+
+
+<script>
+    // --- Theme Toggle Logic ---
+    const themeToggle = document.getElementById('theme-toggle');
+    const themeIcon = document.getElementById('theme-icon');
+    const docElement = document.documentElement;
+
+    function setTheme(isDark) {
+        if (isDark) {
+            docElement.classList.add('dark');
+            themeIcon.textContent = '☀️'; // Sun icon for dark mode
+            localStorage.setItem('theme', 'dark');
+        } else {
+            docElement.classList.remove('dark');
+            themeIcon.textContent = '🌙'; // Moon icon for light mode
+            localStorage.setItem('theme', 'light');
+        }
+    }
+    const savedTheme = localStorage.getItem('theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    setTheme(savedTheme === 'dark' || (!savedTheme && prefersDark));
+    themeToggle.addEventListener('click', () => {
+        setTheme(!docElement.classList.contains('dark'));
+    });
+
+
+    // --- Search Form Logic ---
+    const searchForm = document.getElementById('search-form');
+    const searchInput = document.getElementById('search');
+    const smartSearchInput = document.getElementById('smart-search'); // Might be null
+    const recursiveCheckbox = document.getElementById('recursive');
+    const semantic_search_enabled = {{ semantic_search_enabled | tojson }}; // Get from Flask
+
+    searchForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+        const submitter = event.submitter;
+        const isSmartSubmit = submitter?.name === 'submit_smart';
+        const isFilterSubmit = submitter?.name === 'submit_filter';
+        const filenameTerm = searchInput.value.trim();
+        const smartTerm = smartSearchInput ? smartSearchInput.value.trim() : '';
+        const isRecursive = recursiveCheckbox.checked;
+        let performSmartSearch = false;
+
+        if (semantic_search_enabled && smartTerm && (isSmartSubmit || !isFilterSubmit)) {
+             performSmartSearch = true;
+        } else if (semantic_search_enabled && isSmartSubmit && smartTerm) {
+             performSmartSearch = true;
+        } else if (semantic_search_enabled && isSmartSubmit && !smartTerm) {
+             console.log("Smart search submitted with empty query - ignoring.");
+             return;
+        }
+
+        const params = new URLSearchParams();
+        let navigationTarget = window.location.pathname;
+
+        if (performSmartSearch) {
+            console.log("Submitting Smart Search:", smartTerm);
+            params.set('smart_query', smartTerm);
+            // Optional: Reset path for global search results page
+            // navigationTarget = '/';
+        } else {
+            console.log("Submitting Filename Filter:", filenameTerm, "Recursive:", isRecursive);
+            if (filenameTerm) params.set('search', filenameTerm);
+            params.set('recursive', isRecursive ? 'true' : 'false');
+        }
+
+        // Clear search if both terms are empty and no specific button pressed
+        if (!filenameTerm && !smartTerm && !isSmartSubmit && !isFilterSubmit) {
+            console.log("Clearing search terms.");
+            window.location.href = navigationTarget;
+            return;
+        }
+
+        const paramString = params.toString();
+        // Construct final URL ensuring base path + params
+        const finalUrl = navigationTarget.replace(/\/$/, '') + '/' + (paramString ? '?' + paramString : '');
+
+        console.log("Navigating to:", finalUrl);
+        window.location.href = finalUrl;
+    });
+
+
+    // --- Modal Handling and Protected Folder Logic ---
+    const fileList = document.getElementById('file-list');
+    const modal = document.getElementById('accessKeyModal');
+    const modalTitle = document.getElementById('modalTitle');
+    const modalPathLabel = document.getElementById('modalPathLabel');
+    const modalKeyInput = document.getElementById('modalKeyInput');
+    const modalError = document.getElementById('modalError');
+    const modalCancelBtn = document.getElementById('modalCancelBtn');
+    const modalSubmitBtn = document.getElementById('modalSubmitBtn');
+    let targetPathForModal = null; // Store the relative path for validation
+
+    function showModal(targetPath, folderName) {
+        // Store the raw relative path (like '/private%20docs') for validation endpoint
+        targetPathForModal = targetPath;
+        modalTitle.textContent = `Enter Access Key`;
+        // Decode for display label only
+        try {
+             modalPathLabel.textContent = `For folder: ${decodeURIComponent(folderName)}`;
+        } catch (e) {
+             modalPathLabel.textContent = `For folder: ${folderName}`; // Fallback
+        }
+        modalKeyInput.value = '';
+        modalError.textContent = '';
+        modalSubmitBtn.disabled = false;
+        modalSubmitBtn.innerHTML = 'Submit'; // Reset button text
+        modal.classList.add('active');
+        modalKeyInput.focus();
+    }
+
+    function hideModal() {
+        modal.classList.remove('active');
+        targetPathForModal = null;
+    }
+
+    // Event listener for clicking protected folder links
+    fileList.addEventListener('click', function(event) {
+        const link = event.target.closest('a.protected-folder-link');
+        const listItem = link ? link.closest('li[data-protected="true"]') : null;
+
+        if (link && listItem) {
+            event.preventDefault();
+            // Get the href, which should be the URL-encoded relative path
+            const targetHref = link.getAttribute('href');
+            // Get display name for the modal prompt
+            const folderName = link.querySelector('.folder-name')?.textContent.trim() || targetHref;
+            showModal(targetHref, folderName); // Pass the href (encoded path)
+        }
+    });
+
+    // Modal Cancel Button
+    modalCancelBtn.addEventListener('click', hideModal);
+    // Clicking overlay to close modal
+    modal.addEventListener('click', function(event) { if (event.target === modal) hideModal(); });
+    // Escape key to close modal
+     document.addEventListener('keydown', function(event) { if (event.key === 'Escape' && modal.classList.contains('active')) hideModal(); });
+
+    // Modal Submit Button - Validate Key via Fetch
+    modalSubmitBtn.addEventListener('click', async function() {
+        const enteredKey = modalKeyInput.value;
+        const targetPath = targetPathForModal; // The URL-encoded path from href
+
+        if (!targetPath) return;
+
+        modalSubmitBtn.disabled = true;
+        modalError.textContent = '';
+        modalSubmitBtn.innerHTML = `<svg class="animate-spin inline mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Validating...`;
+
+        try {
+            const response = await fetch('/validate-key', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ path: targetPath, key: enteredKey }) // Send encoded path and key
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.status === 'success') {
+                console.log("Key validated. Navigating to:", targetPath);
+                hideModal();
+                window.location.href = targetPath; // Navigate to the original target path
+            } else {
+                console.error("Key validation failed:", result.message);
+                modalError.textContent = result.message || 'Invalid key or server error.';
+                modalKeyInput.focus();
+                modalKeyInput.select();
+            }
+        } catch (error) {
+            console.error("Fetch error during key validation:", error);
+            modalError.textContent = 'Network error. Could not validate key.';
+        } finally {
+            modalSubmitBtn.disabled = false;
+            modalSubmitBtn.innerHTML = 'Submit';
+        }
+    });
+
+    // Allow submitting modal with Enter key
+    modalKeyInput.addEventListener('keypress', function(event) {
+         if (event.key === 'Enter' && !modalSubmitBtn.disabled) {
+            event.preventDefault(); // Prevent potential form submission if modal is inside one
+             modalSubmitBtn.click();
+         }
+     });
+
+</script>
+</body>
+</html>
