@@ -38,6 +38,8 @@
              transition: width 0.3s ease;
              width: 0%; /* Start at 0 */
          }
+         /* Hide inactive input initially */
+        #folder-input-container { display: none; }
     </style>
 </head>
 <body class="bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-gray-100 transition-colors duration-300 font-sans">
@@ -45,7 +47,7 @@
 
     <!-- Header -->
     <div class="flex justify-between items-center mb-6 border-b border-gray-200 dark:border-gray-700 pb-4">
-        <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100">Upload Files/Folders</h1>
+        <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100">Upload Content</h1>
         <a href="/" class="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline flex items-center space-x-1">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -57,19 +59,36 @@
     <!-- Upload Form -->
     <form id="upload-form" class="space-y-5 bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md">
 
-        <!-- File Input -->
-        <div>
+        <!-- Upload Mode Toggle -->
+        <div class="flex justify-end">
+            <button type="button" id="toggle-upload-mode" class="text-sm text-blue-600 dark:text-blue-400 hover:underline focus:outline-none">
+                Switch to Folder Upload
+            </button>
+        </div>
+
+        <!-- File Input Container (Default) -->
+        <div id="file-input-container">
             <label for="fileInput" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Select Files</label>
-            <input type="file" id="fileInput" name="file" required multiple
+            <input type="file" id="fileInput" name="file" multiple
                    class="block w-full text-sm text-gray-500 dark:text-gray-400 border border-gray-300 dark:border-gray-600 rounded-md cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-800
-                          file:mr-4 file:py-2 file:px-4
-                          file:rounded-l-md file:border-0
-                          file:text-sm file:font-semibold
-                          file:bg-blue-50 dark:file:bg-gray-700
-                          file:text-blue-700 dark:file:text-blue-300
+                          file:mr-4 file:py-2 file:px-4 file:rounded-l-md file:border-0 file:text-sm file:font-semibold
+                          file:bg-blue-50 dark:file:bg-gray-700 file:text-blue-700 dark:file:text-blue-300
                           hover:file:bg-blue-100 dark:hover:file:bg-gray-600">
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400" id="fileInputHelp">
                 You can select multiple files.
+            </p>
+        </div>
+
+        <!-- Folder Input Container (Hidden Initially) -->
+        <div id="folder-input-container">
+            <label for="folderInput" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Select Folder</label>
+            <input type="file" id="folderInput" name="folder" webkitdirectory directory
+                   class="block w-full text-sm text-gray-500 dark:text-gray-400 border border-gray-300 dark:border-gray-600 rounded-md cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-800
+                          file:mr-4 file:py-2 file:px-4 file:rounded-l-md file:border-0 file:text-sm file:font-semibold
+                          file:bg-blue-50 dark:file:bg-gray-700 file:text-blue-700 dark:file:text-blue-300
+                          hover:file:bg-blue-100 dark:hover:file:bg-gray-600">
+             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400" id="folderInputHelp">
+                Select a single folder to upload its entire contents.
             </p>
         </div>
 
@@ -86,12 +105,12 @@
         <!-- Destination Path Input -->
         <div>
             <label for="destPathInput" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Destination Path <span class="text-xs font-normal text-gray-500 dark:text-gray-400">(Optional)</span>
+                Destination Path <span class="text-xs font-normal text-gray-500 dark:text-gray-400">(Optional Base Folder)</span>
             </label>
             <input type="text" id="destPathInput" name="destPath" placeholder="e.g., documents/reports/" aria-describedby="destPathHelp"
                    class="block w-full p-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 focus:ring-blue-500 focus:border-blue-500 sm:text-sm">
              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400" id="destPathHelp">
-                Relative to the root. Leave blank to upload to the root directory. Use forward slashes (/).
+                Relative to the root. Files/folders selected will be placed inside this base folder. Leave blank to upload to root.
             </p>
         </div>
 
@@ -108,7 +127,7 @@
         <div>
             <button type="submit" id="uploadButton"
                     class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-800 disabled:opacity-50 transition duration-150 ease-in-out">
-                Upload Files
+                Upload
             </button>
         </div>
 
@@ -124,7 +143,10 @@
 <script>
     // Get references to DOM elements
     const uploadForm = document.getElementById('upload-form');
+    const fileInputContainer = document.getElementById('file-input-container');
+    const folderInputContainer = document.getElementById('folder-input-container');
     const fileInput = document.getElementById('fileInput');
+    const folderInput = document.getElementById('folderInput');
     const apiKeyInput = document.getElementById('apiKeyInput');
     const destPathInput = document.getElementById('destPathInput');
     const uploadButton = document.getElementById('uploadButton');
@@ -132,6 +154,30 @@
     const progressContainer = document.getElementById('progress-container');
     const progressBar = document.getElementById('upload-progress-bar').firstElementChild;
     const progressPercentage = document.getElementById('progress-percentage');
+    const toggleModeButton = document.getElementById('toggle-upload-mode');
+
+    let isFolderMode = false;
+
+     // --- Toggle Upload Mode --- 
+    toggleModeButton.addEventListener('click', () => {
+        isFolderMode = !isFolderMode;
+        if (isFolderMode) {
+            fileInputContainer.style.display = 'none';
+            folderInputContainer.style.display = 'block';
+            toggleModeButton.textContent = 'Switch to File Upload';
+            // Clear the other input to avoid confusion
+            fileInput.value = '';
+        } else {
+            fileInputContainer.style.display = 'block';
+            folderInputContainer.style.display = 'none';
+            toggleModeButton.textContent = 'Switch to Folder Upload';
+             // Clear the other input
+            folderInput.value = '';
+        }
+         // Reset status/progress when switching modes
+         showStatus('');
+         updateProgress(0, 0);
+    });
 
     // Function to display status messages
     function showStatus(message, type = 'info') {
@@ -173,17 +219,20 @@
         event.preventDefault(); // Prevent default form submission behavior
 
         // --- 1. Get Input Values ---
-        const files = fileInput.files; // FileList object
+        // Determine active input and get files
+        const activeInput = isFolderMode ? folderInput : fileInput;
+        const files = activeInput.files;
+
         const apiKey = apiKeyInput.value.trim();
-        // Clean base destination path: trim, remove leading/trailing slashes, normalize internal slashes
+        // Clean base destination path
         const baseDestPath = destPathInput.value.trim()
                          .replace(/\\/g, '/') // Convert backslashes to forward slashes
                          .replace(/^\/+|\/+$/g, ''); // Remove leading/trailing slashes
 
         // --- 2. Basic Client-Side Validation ---
         if (!files || files.length === 0) {
-            showStatus('Please select at least one file or a folder.', 'error');
-            fileInput.focus(); // Bring focus to the file input
+            showStatus(`Please select ${isFolderMode ? 'a folder' : 'one or more files'}.`, 'error');
+            activeInput.focus();
             return;
         }
         if (!apiKey) {
@@ -215,13 +264,14 @@
 
             // Construct the final relative path for this specific file
             let fileRelativePath;
+            // IMPORTANT: Check webkitRelativePath even if isFolderMode is false,
+            // because files *could* be added via drag-and-drop to the file input.
             if (file.webkitRelativePath) {
-                // Folder upload: use webkitRelativePath (which includes the folder name)
-                // Combine base path and webkit path carefully
+                // Folder upload OR drag-dropped folder: use webkitRelativePath
                  const cleanedWebkitPath = file.webkitRelativePath.replace(/\\/g, '/'); // Ensure forward slashes
                 fileRelativePath = baseDestPath ? `${baseDestPath}/${cleanedWebkitPath}` : cleanedWebkitPath;
             } else {
-                 // Single/Multiple file upload: use base path + filename
+                 // Standard file selection: use base path + filename
                 fileRelativePath = baseDestPath ? `${baseDestPath}/${file.name}` : file.name;
             }
 
@@ -273,7 +323,11 @@
         // --- 5. Final Status ---
         if (errorCount === 0) {
             showStatus(`Successfully uploaded ${successCount} file(s).`, 'success');
-             uploadForm.reset(); // Clear form only if all uploads succeeded
+             // Clear the form only if all uploads succeeded
+             activeInput.value = ''; // Clear the specific input used
+             // Optionally clear other fields too
+             // apiKeyInput.value = '';
+             // destPathInput.value = '';
         } else if (successCount > 0) {
             showStatus(`Completed with ${successCount} successes and ${errorCount} failures.`, 'error'); // Partial success is still an error state overall
         } else {
@@ -293,19 +347,12 @@
     });
 
     // --- Theme Setup ---
-    // Initialize theme on page load (copy from index.html if needed, or ensure consistent setup)
     const docElement = document.documentElement;
-
     function setTheme(isDark) { /* ... same theme logic as index.html ... */ }
-
-    // If you add the theme toggle button to upload.html, uncomment and use this:
+    // Initialize theme if necessary
     // const savedTheme = localStorage.getItem('theme');
     // const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     // setTheme(savedTheme === 'dark' || (!savedTheme && prefersDark));
-    // themeToggle?.addEventListener('click', () => { // Use optional chaining if button might not exist
-    //     setTheme(!docElement.classList.contains('dark'));
-    // });
-
 </script>
 </body>
 </html>
