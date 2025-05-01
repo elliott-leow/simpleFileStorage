@@ -49,6 +49,34 @@
         .lock-icon { display: inline-block; width: 0.8em; height: 0.8em; margin-left: 0.3em; opacity: 0.6; vertical-align: baseline; flex-shrink: 0; }
         /* Other styles */
         li a:hover { transition: background-color 0.2s ease-in-out; }
+        /* Additional Styles for Delete Mode */
+        .delete-checkbox {
+            display: none; /* Hidden by default */
+            margin-right: 0.75rem; /* space-x-3 equivalent */
+            width: 1rem; height: 1rem; /* h-4 w-4 */
+            accent-color: #ef4444; /* red-500 */
+        }
+        body.delete-mode .delete-checkbox {
+            display: inline-block; /* Show in delete mode */
+        }
+        #delete-controls {
+            display: none; /* Hidden by default */
+            margin-top: 1rem; /* mt-4 */
+            padding-top: 1rem; /* pt-4 */
+            border-top: 1px solid #e5e7eb; /* border-gray-200 */
+            gap: 0.75rem; /* space-x-3 */
+            justify-content: flex-end;
+        }
+        .dark #delete-controls { border-color: #4b5563; /* dark:border-gray-700 */ }
+        body.delete-mode #delete-controls {
+            display: flex; /* Show in delete mode */
+        }
+        /* Hide normal action buttons when delete mode active */
+        body.delete-mode #normal-actions {
+            display: none;
+        }
+         /* Modal Specific Styles (can reuse some from access key modal) */
+         #deleteKeyModal .modal-content { max-width: 400px; } /* Smaller modal for key entry */
     </style>
 </head>
 <body class="bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-gray-100 transition-colors duration-300 font-sans">
@@ -57,7 +85,15 @@
     <!-- Header: Title and Controls -->
     <div class="flex justify-between items-center mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
         <h1 class="text-2xl font-bold truncate" title="{{ title }}">{{ title }}</h1>
-        <div class="flex items-center space-x-2 flex-shrink-0">
+        <div id="normal-actions" class="flex items-center space-x-2 flex-shrink-0">
+            {# Show delete button only if key is configured on server #}
+            {% if delete_key_configured %}
+            <button id="delete-mode-btn" title="Enter Delete Mode" aria-label="Enter Delete Mode" class="p-2 rounded hover:bg-red-100 dark:hover:bg-red-900 text-red-600 dark:text-red-400 focus:outline-none focus:ring-2 focus:ring-red-500">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+            </button>
+            {% endif %}
             <a href="/upload-ui" title="Upload File" aria-label="Upload File" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
@@ -150,6 +186,9 @@
             {% if info.is_protected %}data-protected="true"{% endif %}>
 
             <div class="flex items-center justify-between p-3">
+                {# Checkbox (initially hidden, shown in delete mode) #}
+                <input type="checkbox" class="delete-checkbox" name="delete_item" value="{{ info.rel_path }}" aria-label="Select {{ info.display_name }} for deletion">
+
                 <!-- Left side: Icon, Name, Lock, Score -->
                  {# Add class to link if it points to a protected directory for JS targeting #}
                 <a href="/{{ info.rel_path_encoded }}"
@@ -223,6 +262,16 @@
         {% endfor %} {# End of file/folder loop #}
     </ul>
 
+    <!-- Delete Controls (Hidden by default, shown in delete mode) -->
+    <div id="delete-controls">
+        <button type="button" id="cancel-delete-mode-btn" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800">
+            Cancel
+        </button>
+        <button type="button" id="delete-selected-btn" class="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 disabled:opacity-50">
+            Delete Selected
+        </button>
+    </div>
+
 </div> <!-- End main container -->
 
 
@@ -242,6 +291,59 @@
             </button>
             <button type="button" id="modalSubmitBtn" class="inline-flex justify-center rounded-md border border-transparent px-4 py-2 bg-blue-600 text-base font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-800 sm:text-sm disabled:opacity-50">
                 Submit
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Key Modal HTML (New) -->
+<div id="deleteKeyModal" class="modal-overlay">
+    <div class="modal-content">
+        <h3 class="text-lg font-medium leading-6 text-gray-900 dark:text-gray-100 mb-3">Enter Delete Key</h3>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Enter the configured key to enable file deletion.</p>
+        <div>
+            <label for="deleteModalKeyInput" class="sr-only">Delete Key</label>
+            <input type="password" name="deleteModalKeyInput" id="deleteModalKeyInput" autocomplete="current-password"
+                   class="block w-full p-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 focus:ring-blue-500 focus:border-blue-500 sm:text-sm" placeholder="Delete Key">
+        </div>
+        <div class="mt-2 text-sm text-red-600 dark:text-red-400 h-5" id="deleteModalError" aria-live="assertive"></div>
+        <div class="mt-5 sm:mt-6 flex justify-end space-x-3">
+            <button type="button" id="deleteModalCancelBtn" class="inline-flex justify-center rounded-md border border-gray-300 dark:border-gray-600 px-4 py-2 bg-white dark:bg-gray-700 text-base font-medium text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:focus:ring-offset-gray-800 sm:text-sm">
+                Cancel
+            </button>
+            <button type="button" id="deleteModalSubmitBtn" class="inline-flex justify-center rounded-md border border-transparent px-4 py-2 bg-red-600 text-base font-medium text-white shadow-sm hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 dark:focus:ring-offset-gray-800 sm:text-sm disabled:opacity-50">
+                Enable Deletion
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Confirm Delete Modal HTML (New) -->
+<div id="confirmDeleteModal" class="modal-overlay">
+    <div class="modal-content">
+        <h3 class="text-lg font-medium leading-6 text-yellow-700 dark:text-yellow-300 mb-3">Confirm Deletion</h3>
+        <p class="text-sm text-gray-600 dark:text-gray-400 mb-4" id="confirmDeleteText">Are you sure you want to delete these items? This action cannot be undone.</p>
+        <div class="mt-5 sm:mt-6 flex justify-end space-x-3">
+            <button type="button" id="confirmDeleteCancelBtn" class="inline-flex justify-center rounded-md border border-gray-300 dark:border-gray-600 px-4 py-2 bg-white dark:bg-gray-700 text-base font-medium text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:focus:ring-offset-gray-800 sm:text-sm">
+                Cancel
+            </button>
+            <button type="button" id="confirmDeleteConfirmBtn" class="inline-flex justify-center rounded-md border border-transparent px-4 py-2 bg-red-600 text-base font-medium text-white shadow-sm hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 dark:focus:ring-offset-gray-800 sm:text-sm">
+                Confirm Delete
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Result Modal HTML (New) -->
+<div id="deleteResultModal" class="modal-overlay">
+    <div class="modal-content">
+        <h3 class="text-lg font-medium leading-6 text-gray-900 dark:text-gray-100 mb-3" id="deleteResultTitle">Deletion Result</h3>
+        <div class="text-sm text-gray-600 dark:text-gray-400 mb-4 space-y-2" id="deleteResultMessage">
+            <!-- Result details will be populated here -->
+        </div>
+        <div class="mt-5 sm:mt-6 flex justify-end">
+            <button type="button" id="deleteResultCloseBtn" class="inline-flex justify-center rounded-md border border-transparent px-4 py-2 bg-blue-600 text-base font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-800 sm:text-sm">
+                Close & Refresh
             </button>
         </div>
     </div>
@@ -431,6 +533,263 @@
              modalSubmitBtn.click();
          }
      });
+
+    // --- NEW: Delete Mode Logic ---
+    const deleteModeBtn = document.getElementById('delete-mode-btn');
+    const deleteKeyModal = document.getElementById('deleteKeyModal');
+    const deleteModalKeyInput = document.getElementById('deleteModalKeyInput');
+    const deleteModalError = document.getElementById('deleteModalError');
+    const deleteModalCancelBtn = document.getElementById('deleteModalCancelBtn');
+    const deleteModalSubmitBtn = document.getElementById('deleteModalSubmitBtn');
+    const deleteControls = document.getElementById('delete-controls');
+    const cancelDeleteModeBtn = document.getElementById('cancel-delete-mode-btn');
+    const deleteSelectedBtn = document.getElementById('delete-selected-btn');
+    const fileListCheckboxes = document.querySelectorAll('.delete-checkbox');
+    const bodyElement = document.body;
+
+    // New Modal Elements References
+    const confirmDeleteModal = document.getElementById('confirmDeleteModal');
+    const confirmDeleteText = document.getElementById('confirmDeleteText');
+    const confirmDeleteCancelBtn = document.getElementById('confirmDeleteCancelBtn');
+    const confirmDeleteConfirmBtn = document.getElementById('confirmDeleteConfirmBtn');
+    const deleteResultModal = document.getElementById('deleteResultModal');
+    const deleteResultTitle = document.getElementById('deleteResultTitle');
+    const deleteResultMessage = document.getElementById('deleteResultMessage');
+    const deleteResultCloseBtn = document.getElementById('deleteResultCloseBtn');
+
+    let enteredDeleteKey = null;
+    let itemsToDeleteGlobally = []; // Store items for confirmation modal
+    const deleteKeyConfigured = {{ delete_key_configured | tojson }};
+
+    // --- Delete Mode UI Toggles ---
+    function enterDeleteMode(validKey) {
+        enteredDeleteKey = validKey; // Store the validated key
+        bodyElement.classList.add('delete-mode');
+        hideDeleteKeyModal();
+        // Disable delete button if no items checked initially
+        checkAnyCheckboxSelected();
+    }
+
+    function exitDeleteMode() {
+        enteredDeleteKey = null; // Clear stored key
+        bodyElement.classList.remove('delete-mode');
+        // Uncheck all checkboxes
+        fileListCheckboxes.forEach(cb => { cb.checked = false; });
+    }
+
+    function showDeleteKeyModal() { deleteKeyModal?.classList.add('active'); deleteModalKeyInput?.focus(); }
+    function hideDeleteKeyModal() { deleteKeyModal?.classList.remove('active'); deleteModalError.textContent = ''; deleteModalKeyInput.value = ''; }
+
+    // Simplified client-side check (RELY ON SERVER FOR REAL SECURITY)
+    // A better way: fetch('/api/check-delete-key', {method: 'POST', body: JSON.stringify({key: enteredKey})})
+    function validateDeleteKeyLocally(enteredKey) {
+         // This is just a placeholder check for the UI flow.
+         // The actual security check happens on the server during the delete API call.
+         // We only check if *a* key was configured server-side and *a* key was entered client-side.
+         return deleteKeyConfigured && enteredKey.length > 0;
+    }
+
+    // Check if any delete checkbox is selected to enable/disable the delete button
+    function checkAnyCheckboxSelected() {
+        const anyChecked = Array.from(fileListCheckboxes).some(cb => cb.checked);
+        deleteSelectedBtn.disabled = !anyChecked;
+    }
+
+    // --- Delete Event Listeners ---
+    if (deleteModeBtn) {
+        deleteModeBtn.addEventListener('click', showDeleteKeyModal);
+    }
+    if (deleteModalCancelBtn) {
+         deleteModalCancelBtn.addEventListener('click', hideDeleteKeyModal);
+    }
+    if (deleteKeyModal) {
+        // Close modal on overlay click
+        deleteKeyModal.addEventListener('click', (event) => { if (event.target === deleteKeyModal) hideDeleteKeyModal(); });
+        // Close modal on Escape key
+        document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && deleteKeyModal.classList.contains('active')) hideDeleteKeyModal(); });
+    }
+
+    if (deleteModalSubmitBtn) {
+        deleteModalSubmitBtn.addEventListener('click', () => {
+            const keyAttempt = deleteModalKeyInput.value;
+            deleteModalError.textContent = '';
+            // Note: Using a simplified local check here for UI flow demonstration.
+            // Real validation MUST happen server-side.
+            // You might replace this with a fetch to `/api/check-delete-key` in a real app.
+            if (validateDeleteKeyLocally(keyAttempt)) {
+                enterDeleteMode(keyAttempt); // Pass the entered key
+            } else {
+                 deleteModalError.textContent = 'Invalid key entered or feature not configured.';
+                 deleteModalKeyInput.focus();
+                 deleteModalKeyInput.select();
+            }
+        });
+        // Allow submit with Enter key
+        deleteModalKeyInput?.addEventListener('keypress', (event) => {
+             if (event.key === 'Enter') { event.preventDefault(); deleteModalSubmitBtn.click(); }
+        });
+    }
+
+    if (cancelDeleteModeBtn) {
+        cancelDeleteModeBtn.addEventListener('click', exitDeleteMode);
+    }
+
+    // Add listeners to checkboxes to enable/disable delete button
+    fileListCheckboxes.forEach(cb => {
+         cb.addEventListener('change', checkAnyCheckboxSelected);
+    });
+
+    // Modified: deleteSelectedBtn only shows confirmation modal
+    if (deleteSelectedBtn) {
+        deleteSelectedBtn.addEventListener('click', () => {
+            itemsToDeleteGlobally = Array.from(fileListCheckboxes)
+                                     .filter(cb => cb.checked)
+                                     .map(cb => cb.value);
+
+            if (itemsToDeleteGlobally.length === 0) {
+                // Use result modal for this minor feedback instead of alert
+                deleteResultTitle.textContent = 'Selection Required';
+                deleteResultMessage.textContent = 'Please select at least one item to delete.';
+                showDeleteResultModal();
+                // Make the close button just close, not refresh
+                deleteResultCloseBtn.onclick = () => hideDeleteResultModal();
+                return;
+            }
+            if (!enteredDeleteKey) {
+                 showDeleteResultModal();
+                 deleteResultTitle.textContent = 'Error';
+                 deleteResultMessage.textContent = 'Delete key not verified. Please re-enter delete mode.';
+                 deleteResultCloseBtn.onclick = () => { hideDeleteResultModal(); exitDeleteMode(); };
+                 return;
+            }
+
+            const itemCount = itemsToDeleteGlobally.length;
+            confirmDeleteText.textContent = `Are you sure you want to delete ${itemCount} selected item(s)? This cannot be undone.`;
+            showConfirmDeleteModal();
+        });
+    }
+
+    // New: Listener for the CONFIRM button in the confirmation modal
+     if (confirmDeleteConfirmBtn) {
+         confirmDeleteConfirmBtn.addEventListener('click', () => {
+             performDelete(itemsToDeleteGlobally);
+         });
+     }
+
+     // New: Listener for the CANCEL button in the confirmation modal
+     if (confirmDeleteCancelBtn) {
+         confirmDeleteCancelBtn.addEventListener('click', hideConfirmDeleteModal);
+     }
+
+    // New: Listener for the CLOSE button in the result modal
+    if (deleteResultCloseBtn) {
+        deleteResultCloseBtn.addEventListener('click', () => {
+            // Default behavior is refresh, modified above for selection errors
+             hideDeleteResultModal();
+             location.reload();
+        });
+    }
+
+    // New: Listeners to close modals on overlay click / Escape key
+    [confirmDeleteModal, deleteResultModal].forEach(modalElement => {
+        if (modalElement) {
+            modalElement.addEventListener('click', (event) => {
+                if (event.target === modalElement) {
+                    if (modalElement.id === 'confirmDeleteModal') hideConfirmDeleteModal();
+                    else if (modalElement.id === 'deleteResultModal') {
+                         hideDeleteResultModal();
+                         // Only refresh if it was a real result, not just feedback
+                         if (deleteResultTitle.textContent !== 'Selection Required') {
+                            location.reload();
+                         }
+                    }
+                }
+            });
+        }
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+             if (confirmDeleteModal?.classList.contains('active')) hideConfirmDeleteModal();
+             if (deleteResultModal?.classList.contains('active')) {
+                  hideDeleteResultModal();
+                  if (deleteResultTitle.textContent !== 'Selection Required') {
+                      location.reload();
+                  }
+             }
+        }
+    });
+
+    // --- Function to perform the actual API call --- 
+    async function performDelete(itemsToDelete) {
+        if (!enteredDeleteKey) {
+            // This should ideally not happen if UI flow is correct, but good safeguard
+            exitDeleteMode();
+            showDeleteResultModal(); // Use result modal for this error too
+            deleteResultTitle.textContent = 'Error';
+            deleteResultMessage.textContent = 'Delete key validation lost. Please try again.';
+            return;
+        }
+
+        // Disable confirm button while processing
+        confirmDeleteConfirmBtn.disabled = true;
+        confirmDeleteConfirmBtn.textContent = 'Deleting...';
+
+        try {
+            const response = await fetch('/api/delete-items', {
+                method: 'POST',
+                headers: {
+                     'Content-Type': 'application/json',
+                     'Accept': 'application/json',
+                     'X-Delete-Key': enteredDeleteKey // Send the verified key
+                },
+                body: JSON.stringify({ items_to_delete: itemsToDelete })
+            });
+
+            const result = await response.json();
+
+            // Prepare result message content (HTML for better formatting)
+            let resultHTML = `<p>Success: <strong>${result.success_count || 0}</strong>, Failed: <strong>${result.fail_count || 0}</strong></p>`;
+            if (result.errors && result.errors.length > 0) {
+                 resultHTML += '<p class="mt-2 font-medium">Errors:</p><ul class="list-disc list-inside text-xs">';
+                 result.errors.forEach(err => {
+                     // Basic escaping for safety, though paths are generally controlled
+                     const safePath = err.path.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                     const safeError = err.error.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                     resultHTML += `<li><code>${safePath}</code>: ${safeError}</li>`;
+                 });
+                 resultHTML += '</ul>';
+            }
+
+            // Show result modal
+            deleteResultTitle.textContent = (result.fail_count > 0) ? 'Deletion Complete (with errors)' : 'Deletion Successful';
+            deleteResultMessage.innerHTML = resultHTML;
+            showDeleteResultModal();
+
+            // If the API call itself failed (not just partial deletion errors)
+            if (!response.ok && response.status !== 207) {
+                 throw new Error(result.error || `Deletion request failed with status ${response.status}`);
+            }
+
+        } catch (error) {
+            console.error("Deletion error:", error);
+            // Show error in result modal
+            deleteResultTitle.textContent = 'Deletion Error';
+            deleteResultMessage.textContent = `An error occurred during deletion: ${error.message}`;
+            showDeleteResultModal();
+            exitDeleteMode(); // Exit delete mode on major error
+        } finally {
+            // Re-enable confirm button and restore text
+            confirmDeleteConfirmBtn.disabled = false;
+            confirmDeleteConfirmBtn.textContent = 'Confirm Delete';
+            hideConfirmDeleteModal(); // Hide confirmation modal after processing
+        }
+    }
+
+    // --- NEW: Delete Mode UI Toggles ---
+    function showConfirmDeleteModal() { confirmDeleteModal?.classList.add('active'); }
+    function hideConfirmDeleteModal() { confirmDeleteModal?.classList.remove('active'); }
+    function showDeleteResultModal() { deleteResultModal?.classList.add('active'); }
+    function hideDeleteResultModal() { deleteResultModal?.classList.remove('active'); }
 
 </script>
 </body>

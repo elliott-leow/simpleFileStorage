@@ -47,6 +47,9 @@ if app.secret_key == "dev-insecure-fallback-key":
 PUBLIC_DIR = os.path.expanduser("~/public")
 # Use global key for general uploads and potentially admin actions like rebuild
 UPLOAD_API_KEY = os.getenv("KEY")
+# Key required for deleting files/folders
+DELETE_KEY = os.getenv("DELETE_KEY")
+DELETE_KEY_CONFIGURED = bool(DELETE_KEY)
 
 # Ensure PUBLIC_DIR exists
 if not os.path.exists(PUBLIC_DIR):
@@ -92,6 +95,40 @@ def load_folder_keys():
 load_folder_keys() # Load config on startup
 
 # app.py
+
+def get_all_directories(start_path_abs, base_path_abs):
+    """Recursively finds all directory relative paths within the start path."""
+    dir_list = []
+    try:
+        for root, dirs, _ in os.walk(start_path_abs, topdown=True):
+            # Ensure we don't follow symlinks outside the base path or process unsafe roots
+            if not check_path_safety(root): # check_path_safety compares against PUBLIC_DIR
+                print(f"Warning: get_all_directories skipping unsafe path: {root}")
+                dirs[:] = [] # Don't descend further into this branch
+                continue
+
+            # Add the current root (relative to base) to the list, skip the base itself
+            rel_root = os.path.relpath(root, base_path_abs)
+            if rel_root != '.': # Don't add the root path itself as '.'
+                 # Normalize for display (use forward slashes)
+                normalized_rel_root = rel_root.replace(os.sep, '/')
+                dir_list.append(normalized_rel_root)
+
+            # Filter dirs to prevent descending into potentially unsafe symlinked directories
+            safe_dirs = []
+            for d in dirs:
+                dir_abs_path = os.path.join(root, d)
+                if check_path_safety(dir_abs_path):
+                    safe_dirs.append(d)
+                else:
+                    print(f"Warning: get_all_directories skipping descent into unsafe dir: {dir_abs_path}")
+            dirs[:] = safe_dirs # Modify dirs in place for os.walk
+
+    except OSError as e:
+        print(f"Error walking directory {start_path_abs} in get_all_directories: {e}")
+
+    dir_list.sort()
+    return dir_list
 
 def find_files_by_name(query, start_dir_abs, base_public_dir, recursive=False):
     """
@@ -493,7 +530,8 @@ def serve(path):
             is_smart_search_results=is_smart_search_results,
             semantic_search_enabled=MODEL_LOADED,
             permission_denied=permission_denied, # Pass denied status
-            current_path=norm_current_path # Pass normalized, unquoted path
+            current_path=norm_current_path, # Pass normalized, unquoted path
+            delete_key_configured=DELETE_KEY_CONFIGURED # Pass delete key status
         )
     else:
         # Path exists, is safe, but not a file or directory? Unexpected.
@@ -589,7 +627,11 @@ def upload_file(filename):
 @app.route('/upload-ui')
 def upload_ui():
     """Serves the simple HTML upload interface."""
-    return render_template('upload.html', title="Upload File")
+    destination_dirs = get_all_directories(PUBLIC_DIR, PUBLIC_DIR)
+    return render_template('upload.html',
+                           title="Upload File",
+                           destination_dirs=destination_dirs # Pass the list here
+                           )
 
 
 @app.route('/rebuild-index', methods=['POST'])
@@ -625,6 +667,139 @@ def trigger_rebuild_index():
         print(f"Error during manual index rebuild: {e}")
         return jsonify(status="error", message=f"Rebuild failed: {e}"), 500
 
+
+# --- API Endpoint for Directory Listing ---
+@app.route('/api/list-dirs', methods=['POST'])
+def api_list_dirs():
+    """API endpoint to list subdirectories within a given path."""
+    data = request.get_json()
+    relative_req_path = data.get('path', '').strip('/') if data else '' # Default to root
+
+    # --- Path Calculation and Safety Check ---
+    current_path_abs = os.path.normpath(os.path.join(PUBLIC_DIR, relative_req_path))
+    if not check_path_safety(current_path_abs):
+        print(f"API Forbidden: Attempt to list outside PUBLIC_DIR: {current_path_abs}")
+        return jsonify(error="Access forbidden."), 403
+    if not os.path.isdir(current_path_abs): # Ensure it's a directory
+        print(f"API Not Found: Path is not a directory: {current_path_abs}")
+        return jsonify(error="Path not found or is not a directory."), 404
+
+    # --- Check Session Permission for Requested Path ---
+    required_key = get_required_key_for_path(relative_req_path)
+    has_session_access = False
+    if required_key:
+        authorized_paths_list = session.get('authorized_paths', [])
+        authorized_paths_set = set(authorized_paths_list)
+        # Check if any authorized path covers the requested path (simplified check)
+        for authorized_path in authorized_paths_set:
+             is_root_authorized = authorized_path == ''
+             if relative_req_path == authorized_path or \
+                (is_root_authorized and relative_req_path != '') or \
+                (not is_root_authorized and relative_req_path.startswith(authorized_path + os.sep)):
+                  has_session_access = True; break
+        if not has_session_access:
+            print(f"API Unauthorized: Access denied to list protected path: {relative_req_path}")
+            # Return a specific error type the frontend can potentially handle (e.g., prompt for key)
+            return jsonify(error="Authentication required to view this folder.", requires_key=True, path=relative_req_path), 401
+    # --- End Session Check ---
+
+    subdirs = []
+    try:
+        for name in sorted(os.listdir(current_path_abs), key=lambda s: s.lower()):
+            entry_path_abs = os.path.join(current_path_abs, name)
+            # Check safety again for item (paranoid check, good for symlinks)
+            if not check_path_safety(entry_path_abs):
+                continue
+            # We only want directories
+            if os.path.isdir(entry_path_abs):
+                subdirs.append(name)
+    except OSError as e:
+        print(f"API Error listing directory {current_path_abs}: {e}")
+        return jsonify(error=f"Error listing directory: {e}"), 500
+
+    return jsonify(subdirs=subdirs, current_path=relative_req_path)
+
+# --- End API Endpoint ---
+
+# --- API Endpoint for Deleting Items ---
+@app.route('/api/delete-items', methods=['POST'])
+def api_delete_items():
+    """API endpoint to delete files or folders."""
+    if not DELETE_KEY_CONFIGURED:
+        return jsonify(error="Deletion feature not configured on server."), 501 # Not Implemented
+
+    provided_key = request.headers.get('X-Delete-Key')
+    if not provided_key or provided_key != DELETE_KEY:
+        print("API Delete Unauthorized: Incorrect or missing X-Delete-Key.")
+        return jsonify(error="Unauthorized. Invalid delete key."), 401
+
+    data = request.get_json()
+    if not data or 'items_to_delete' not in data or not isinstance(data['items_to_delete'], list):
+        return jsonify(error="Invalid request body. Expected {'items_to_delete': [...]}."), 400
+
+    items_to_delete = data['items_to_delete']
+    success_count = 0
+    fail_count = 0
+    errors = []
+
+    for item_rel_path in items_to_delete:
+        if not isinstance(item_rel_path, str):
+            fail_count += 1
+            errors.append({"path": "(invalid format)", "error": "Invalid item format in list."})    
+            continue # Skip non-string paths
+            
+        norm_item_rel_path = os.path.normpath(item_rel_path.strip('/'))
+        if norm_item_rel_path == '.': norm_item_rel_path = '' # Handle root case if passed
+
+        item_abs_path = os.path.normpath(os.path.join(PUBLIC_DIR, norm_item_rel_path))
+
+        # --- Security / Safety Checks ---
+        if not check_path_safety(item_abs_path):
+            print(f"API Delete Forbidden: Attempt to delete outside PUBLIC_DIR: {item_abs_path}")
+            fail_count += 1
+            errors.append({"path": norm_item_rel_path, "error": "Access forbidden (path outside public area)."})
+            continue
+        # Prevent deleting the root directory itself
+        if item_abs_path == os.path.normpath(PUBLIC_DIR):
+             print(f"API Delete Forbidden: Attempt to delete root PUBLIC_DIR.")
+             fail_count += 1
+             errors.append({"path": "/", "error": "Cannot delete the root directory."})    
+             continue
+        
+        if not os.path.lexists(item_abs_path): # Use lexists to handle broken symlinks gracefully
+            print(f"API Delete Warning: Item not found: {item_abs_path}")
+            fail_count += 1
+            errors.append({"path": norm_item_rel_path, "error": "Item not found."})    
+            continue
+
+        # --- Attempt Deletion ---
+        try:
+            if os.path.isdir(item_abs_path) and not os.path.islink(item_abs_path):
+                shutil.rmtree(item_abs_path)
+                print(f"API Delete Success (Directory): {item_abs_path}")
+            else: # Files or symlinks
+                os.remove(item_abs_path)
+                print(f"API Delete Success (File/Link): {item_abs_path}")
+            success_count += 1
+        except OSError as e:
+            print(f"API Delete Error for {item_abs_path}: {e}")
+            fail_count += 1
+            errors.append({"path": norm_item_rel_path, "error": f"OS error during deletion: {e.strerror}"})
+        except Exception as e:
+            print(f"API Delete Unexpected Error for {item_abs_path}: {e}")
+            fail_count += 1
+            errors.append({"path": norm_item_rel_path, "error": f"Unexpected error during deletion: {str(e)}"})
+
+    # --- Return Result ---
+    response = {
+        "success_count": success_count,
+        "fail_count": fail_count,
+        "errors": errors
+    }
+    status_code = 200 if fail_count == 0 else 207 # 207 Multi-Status if there were errors
+
+    return jsonify(response), status_code
+# --- End Delete API Endpoint ---
 
 # --- Error Handlers ---
 @app.errorhandler(404)
@@ -663,6 +838,7 @@ if __name__ == "__main__":
          print("Semantic index file not found or invalid. Use POST /rebuild-index (with global API key) to build it.")
     elif MODEL_LOADED:
          print(f"Semantic index loaded with {SEMANTIC_INDEX_DATA.get('embeddings', np.array([])).shape[0]} embeddings.")
+    print(f"Delete Key Configured: {DELETE_KEY_CONFIGURED}") # Log delete key status
     if app.secret_key == "dev-insecure-fallback-key":
         print("!!! Flask Session Secret Key is INSECURE !!!")
     print("-" * 50)
