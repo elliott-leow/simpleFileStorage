@@ -703,21 +703,25 @@ def api_list_dirs():
             return jsonify(error="Authentication required to view this folder.", requires_key=True, path=relative_req_path), 401
     # --- End Session Check ---
 
-    subdirs = []
+    subdirs_data = [] # Changed from subdirs list to list of dicts
     try:
         for name in sorted(os.listdir(current_path_abs), key=lambda s: s.lower()):
             entry_path_abs = os.path.join(current_path_abs, name)
-            # Check safety again for item (paranoid check, good for symlinks)
-            if not check_path_safety(entry_path_abs):
-                continue
-            # We only want directories
-            if os.path.isdir(entry_path_abs):
-                subdirs.append(name)
+            if not check_path_safety(entry_path_abs): continue
+
+            if os.path.isdir(entry_path_abs): # We only care about directories
+                 # Calculate relative path for the subdirectory to check its protection
+                item_rel_path = os.path.normpath(os.path.join(relative_req_path, name))
+                is_item_protected = bool(get_required_key_for_path(item_rel_path))
+                subdirs_data.append({
+                     'name': name,
+                     'is_protected': is_item_protected
+                 })
     except OSError as e:
         print(f"API Error listing directory {current_path_abs}: {e}")
         return jsonify(error=f"Error listing directory: {e}"), 500
 
-    return jsonify(subdirs=subdirs, current_path=relative_req_path)
+    return jsonify(subdirs=subdirs_data, current_path=relative_req_path) # Return list of dicts
 
 # --- End API Endpoint ---
 
