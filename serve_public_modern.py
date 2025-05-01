@@ -676,7 +676,12 @@ def api_list_dirs():
     relative_req_path = data.get('path', '').strip('/') if data else '' # Default to root
 
     # --- Path Calculation and Safety Check ---
-    current_path_abs = os.path.normpath(os.path.join(PUBLIC_DIR, relative_req_path))
+    # Ensure normalization happens *before* permission checks
+    norm_relative_req_path = os.path.normpath(relative_req_path)
+    if norm_relative_req_path == '.': norm_relative_req_path = '' # Handle root normalization
+
+    # Use normalized path for checks from here
+    current_path_abs = os.path.normpath(os.path.join(PUBLIC_DIR, norm_relative_req_path))
     if not check_path_safety(current_path_abs):
         print(f"API Forbidden: Attempt to list outside PUBLIC_DIR: {current_path_abs}")
         return jsonify(error="Access forbidden."), 403
@@ -685,23 +690,32 @@ def api_list_dirs():
         return jsonify(error="Path not found or is not a directory."), 404
 
     # --- Check Session Permission for Requested Path ---
-    required_key = get_required_key_for_path(relative_req_path)
+    print(f"[API /api/list-dirs] Checking access for normalized path: '{norm_relative_req_path}'") # DEBUG
+    required_key = get_required_key_for_path(norm_relative_req_path)
     has_session_access = False
     if required_key:
         authorized_paths_list = session.get('authorized_paths', [])
         authorized_paths_set = set(authorized_paths_list)
+        print(f"[API /api/list-dirs] Path requires key. Session authorized paths: {authorized_paths_set}") # DEBUG
         # Check if any authorized path covers the requested path (simplified check)
         for authorized_path in authorized_paths_set:
+             # Ensure authorized_path from session is also normalized (should be already by /validate-key)
+             # norm_authorized_path = os.path.normpath(authorized_path) # Probably redundant but safe
              is_root_authorized = authorized_path == ''
-             if relative_req_path == authorized_path or \
-                (is_root_authorized and relative_req_path != '') or \
-                (not is_root_authorized and relative_req_path.startswith(authorized_path + os.sep)):
+             # Compare normalized requested path with paths from session
+             if norm_relative_req_path == authorized_path or \
+                (is_root_authorized and norm_relative_req_path != '') or \
+                (not is_root_authorized and norm_relative_req_path.startswith(authorized_path + os.sep)):
+                  print(f"[API /api/list-dirs] Access GRANTED via session path: '{authorized_path}'") # DEBUG
                   has_session_access = True; break
         if not has_session_access:
-            print(f"API Unauthorized: Access denied to list protected path: {relative_req_path}")
+            print(f"[API /api/list-dirs] Access DENIED for path: '{norm_relative_req_path}'. Returning 401.") # DEBUG
             # Return a specific error type the frontend can potentially handle (e.g., prompt for key)
-            return jsonify(error="Authentication required to view this folder.", requires_key=True, path=relative_req_path), 401
+            # Pass back the *original* relative_req_path for the password prompt label if needed, or normalized?
+            # Let's pass normalized for consistency in the API response structure
+            return jsonify(error="Authentication required to view this folder.", requires_key=True, path=norm_relative_req_path), 401
     # --- End Session Check ---
+    print(f"[API /api/list-dirs] Access appears GRANTED (or not needed) for: '{norm_relative_req_path}'") # DEBUG
 
     subdirs_data = [] # Changed from subdirs list to list of dicts
     try:
@@ -711,7 +725,8 @@ def api_list_dirs():
 
             if os.path.isdir(entry_path_abs): # We only care about directories
                  # Calculate relative path for the subdirectory to check its protection
-                item_rel_path = os.path.normpath(os.path.join(relative_req_path, name))
+                 # Use the normalized requested path as the base for joining
+                item_rel_path = os.path.normpath(os.path.join(norm_relative_req_path, name))
                 is_item_protected = bool(get_required_key_for_path(item_rel_path))
                 subdirs_data.append({
                      'name': name,
@@ -721,7 +736,7 @@ def api_list_dirs():
         print(f"API Error listing directory {current_path_abs}: {e}")
         return jsonify(error=f"Error listing directory: {e}"), 500
 
-    return jsonify(subdirs=subdirs_data, current_path=relative_req_path) # Return list of dicts
+    return jsonify(subdirs=subdirs_data, current_path=norm_relative_req_path) # Return normalized path
 
 # --- End API Endpoint ---
 

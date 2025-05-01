@@ -315,6 +315,7 @@
                     folderList.innerHTML = '';
                     modalError.classList.add('hidden');
                 } else {
+                    console.log("[fetchAndRenderDirs] Stopping execution after handling non-OK response (e.g., 401)."); // DEBUG
                     throw new Error(data.error || `HTTP error ${response.status}`);
                 }
                  modalLoading.classList.add('hidden');
