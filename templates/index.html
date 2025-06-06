@@ -84,7 +84,17 @@
 
     <!-- Header: Title and Controls -->
     <div class="flex justify-between items-center mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
-        <h1 class="text-2xl font-bold truncate" title="{{ title }}">{{ title }}</h1>
+        <div class="flex items-center space-x-3 min-w-0">
+            <h1 class="text-2xl font-bold truncate" title="{{ title }}">{{ title }}</h1>
+            {# --- NEW: Hidden Folder Toggle --- #}
+            {% if current_path and hidden_key_configured %}
+            <label for="hidden-toggle" class="flex items-center space-x-1.5 cursor-pointer text-sm text-gray-600 dark:text-gray-400 p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700" title="Toggle folder visibility in listings">
+                <input type="checkbox" id="hidden-toggle" class="h-4 w-4 rounded accent-indigo-600" {% if is_current_path_hidden %}checked{% endif %}>
+                <span>Hidden</span>
+            </label>
+            {% endif %}
+            {# --- End Hidden Folder Toggle --- #}
+        </div>
         <div id="normal-actions" class="flex items-center space-x-2 flex-shrink-0">
             {# Show delete button only if key is configured on server #}
             {% if delete_key_configured %}
@@ -344,6 +354,28 @@
         <div class="mt-5 sm:mt-6 flex justify-end">
             <button type="button" id="deleteResultCloseBtn" class="inline-flex justify-center rounded-md border border-transparent px-4 py-2 bg-blue-600 text-base font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-800 sm:text-sm">
                 Close & Refresh
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Hidden Key Modal HTML (New) -->
+<div id="hiddenKeyModal" class="modal-overlay">
+    <div class="modal-content">
+        <h3 class="text-lg font-medium leading-6 text-gray-900 dark:text-gray-100 mb-3">Visibility Change</h3>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4" id="hiddenModalActionText"></p>
+        <div>
+            <label for="hiddenModalKeyInput" class="sr-only">Hidden Key</label>
+            <input type="password" name="hiddenModalKeyInput" id="hiddenModalKeyInput" autocomplete="off"
+                   class="block w-full p-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="Enter Hidden Key">
+        </div>
+        <div class="mt-2 text-sm text-red-600 dark:text-red-400 h-5" id="hiddenModalError" aria-live="assertive"></div>
+        <div class="mt-5 sm:mt-6 flex justify-end space-x-3">
+            <button type="button" id="hiddenModalCancelBtn" class="inline-flex justify-center rounded-md border border-gray-300 dark:border-gray-600 px-4 py-2 bg-white dark:bg-gray-700 text-base font-medium text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:focus:ring-offset-gray-800 sm:text-sm">
+                Cancel
+            </button>
+            <button type="button" id="hiddenModalConfirmBtn" class="inline-flex justify-center rounded-md border border-transparent px-4 py-2 bg-indigo-600 text-base font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 dark:focus:ring-offset-gray-800 sm:text-sm disabled:opacity-50">
+                Confirm
             </button>
         </div>
     </div>
@@ -790,6 +822,102 @@
     function hideConfirmDeleteModal() { confirmDeleteModal?.classList.remove('active'); }
     function showDeleteResultModal() { deleteResultModal?.classList.add('active'); }
     function hideDeleteResultModal() { deleteResultModal?.classList.remove('active'); }
+
+    // --- NEW: Hidden Folder Logic ---
+    const hiddenToggle = document.getElementById('hidden-toggle');
+    const hiddenKeyConfigured = {{ hidden_key_configured | tojson }};
+    const currentPath = {{ current_path | tojson }};
+    const isCurrentlyHidden = {{ is_current_path_hidden | tojson }};
+
+    if (hiddenToggle && hiddenKeyConfigured) {
+        hiddenToggle.addEventListener('change', (event) => {
+            const isChecked = event.target.checked;
+            // The action text depends on the new state
+            const actionText = isChecked
+                ? `This will hide the folder '/${currentPath}' from all listings. It will only be accessible via direct link.`
+                : `This will make the folder '/${currentPath}' visible in all listings again.`;
+            
+            hiddenModalActionText.textContent = actionText + " Please enter the key to confirm.";
+            hiddenModalKeyInput.value = '';
+            hiddenModalError.textContent = '';
+            hiddenModalConfirmBtn.disabled = false;
+            hiddenModalConfirmBtn.textContent = 'Confirm';
+            hiddenKeyModal.classList.add('active');
+            hiddenModalKeyInput.focus();
+        });
+    }
+
+    function hideHiddenKeyModal() {
+        hiddenKeyModal.classList.remove('active');
+        // IMPORTANT: Revert checkbox state if the action was cancelled
+        if (hiddenToggle) {
+            hiddenToggle.checked = isCurrentlyHidden;
+        }
+    }
+
+    if (hiddenModalCancelBtn) {
+        hiddenModalCancelBtn.addEventListener('click', hideHiddenKeyModal);
+    }
+    if (hiddenKeyModal) {
+        hiddenKeyModal.addEventListener('click', (event) => { if (event.target === hiddenKeyModal) hideHiddenKeyModal(); });
+    }
+     document.addEventListener('keydown', (event) => { 
+        if (event.key === 'Escape') {
+            if (modal.classList.contains('active')) hideModal();
+            if (deleteKeyModal?.classList.contains('active')) hideDeleteKeyModal();
+            if (hiddenKeyModal?.classList.contains('active')) hideHiddenKeyModal();
+        }
+    });
+
+    if (hiddenModalConfirmBtn) {
+        hiddenModalConfirmBtn.addEventListener('click', async () => {
+            const key = hiddenModalKeyInput.value;
+            const shouldHide = hiddenToggle.checked;
+
+            if (!key) {
+                hiddenModalError.textContent = 'Key cannot be empty.';
+                return;
+            }
+
+            hiddenModalError.textContent = '';
+            hiddenModalConfirmBtn.disabled = true;
+            hiddenModalConfirmBtn.textContent = 'Working...';
+
+            try {
+                const response = await fetch('/api/toggle-hidden', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify({ path: currentPath, key: key, hide: shouldHide })
+                });
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.error || `Request failed with status ${response.status}`);
+                }
+                
+                // Success! The folder is now hidden/unhidden.
+                // Redirect to the parent directory to see the change.
+                const parentUrl = '{{ parent_url }}' || '/';
+                console.log(`Visibility toggled. Redirecting to parent: ${parentUrl}`);
+                window.location.href = parentUrl;
+
+            } catch(error) {
+                console.error('Error toggling hidden state:', error);
+                hiddenModalError.textContent = error.message;
+                hiddenModalConfirmBtn.disabled = false;
+                hiddenModalConfirmBtn.textContent = 'Confirm';
+            }
+        });
+    }
+     if (hiddenModalKeyInput) {
+        hiddenModalKeyInput.addEventListener('keypress', function(event) {
+            if (event.key === 'Enter' && !hiddenModalConfirmBtn.disabled) {
+                event.preventDefault();
+                hiddenModalConfirmBtn.click();
+            }
+        });
+    }
 
 </script>
 </body>

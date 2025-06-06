@@ -50,6 +50,9 @@ UPLOAD_API_KEY = os.getenv("KEY")
 # Key required for deleting files/folders
 DELETE_KEY = os.getenv("DELETE_KEY")
 DELETE_KEY_CONFIGURED = bool(DELETE_KEY)
+# Key for hiding/unhiding folders
+HIDDEN_KEY = os.getenv("HIDDEN_KEY")
+HIDDEN_KEY_CONFIGURED = bool(HIDDEN_KEY)
 
 # Ensure PUBLIC_DIR exists
 if not os.path.exists(PUBLIC_DIR):
@@ -59,6 +62,40 @@ if not os.path.exists(PUBLIC_DIR):
 # --- Folder Protection Configuration ---
 FOLDER_KEYS_CONFIG_FILE = 'folder_keys.json'
 PROTECTED_FOLDERS = {} # Dictionary to store {normpath: key}
+
+# --- Folder Visibility Configuration ---
+FOLDER_VISIBILITY_CONFIG_FILE = 'folder_visibility.json'
+HIDDEN_PATHS = set() # Set to store normalized relative paths of hidden folders
+
+def load_hidden_paths():
+    """Loads the set of hidden paths from the visibility config file."""
+    global HIDDEN_PATHS
+    try:
+        if os.path.exists(FOLDER_VISIBILITY_CONFIG_FILE):
+            with open(FOLDER_VISIBILITY_CONFIG_FILE, 'r') as f:
+                data = json.load(f)
+                # Normalize paths on load
+                raw_paths = data.get('hidden_paths', [])
+                HIDDEN_PATHS = {os.path.normpath(p.strip('/')) for p in raw_paths if p}
+                print(f"Loaded {len(HIDDEN_PATHS)} hidden folder paths.")
+        else:
+            HIDDEN_PATHS = set()
+            print(f"Info: {FOLDER_VISIBILITY_CONFIG_FILE} not found. No folders are hidden.")
+    except (json.JSONDecodeError, TypeError) as e:
+        print(f"Error loading or parsing {FOLDER_VISIBILITY_CONFIG_FILE}: {e}")
+        HIDDEN_PATHS = set()
+
+def save_hidden_paths():
+    """Saves the current set of hidden paths to the config file."""
+    try:
+        # Convert set to a sorted list for consistent file output
+        data = {'hidden_paths': sorted(list(HIDDEN_PATHS))}
+        with open(FOLDER_VISIBILITY_CONFIG_FILE, 'w') as f:
+            json.dump(data, f, indent=4)
+        return True
+    except Exception as e:
+        print(f"Error saving {FOLDER_VISIBILITY_CONFIG_FILE}: {e}")
+        return False
 
 def load_folder_keys():
     """Loads protected folder configurations from JSON file."""
@@ -93,6 +130,7 @@ def load_folder_keys():
         PROTECTED_FOLDERS = {}
 
 load_folder_keys() # Load config on startup
+load_hidden_paths() # Load hidden paths config on startup
 
 # app.py
 
@@ -109,6 +147,13 @@ def get_all_directories(start_path_abs, base_path_abs):
 
             # Add the current root (relative to base) to the list, skip the base itself
             rel_root = os.path.relpath(root, base_path_abs)
+            norm_rel_root = os.path.normpath(rel_root) # Get normalized path for check
+
+            # Check if path is hidden; if so, don't add it or its children
+            if norm_rel_root != '.' and norm_rel_root in HIDDEN_PATHS:
+                dirs[:] = [] # Prevent descending into hidden directory
+                continue
+
             if rel_root != '.': # Don't add the root path itself as '.'
                  # Normalize for display (use forward slashes)
                 normalized_rel_root = rel_root.replace(os.sep, '/')
@@ -168,7 +213,10 @@ def find_files_by_name(query, start_dir_abs, base_public_dir, recursive=False):
                     entry_rel_path = os.path.relpath(entry_abs_path, base_public_dir)
                     # Avoid adding duplicates if walk yields same path multiple times (unlikely but possible)
                     # We'll rely on the caller to handle adding to a final dictionary/set
-                    results.append({'rel_path': entry_rel_path, 'abs_path': entry_abs_path, 'name': name})
+                    # Let's filter hidden paths here as well
+                    norm_entry_rel_path = os.path.normpath(entry_rel_path)
+                    if norm_entry_rel_path not in HIDDEN_PATHS:
+                        results.append({'rel_path': entry_rel_path, 'abs_path': entry_abs_path, 'name': name})
 
             # Crucial: If not recursive, break *after* processing the first level
             if not recursive and root == start_dir_abs:
@@ -310,6 +358,7 @@ def serve(path):
     parent_url = '/'
     is_smart_search_results = False
     permission_denied = False # Assume access OK until check fails
+    is_current_path_hidden = False # Is the folder we are currently viewing hidden?
 
     # --- Path Calculation and Base Safety Check ---
     # Use the raw path from the route for joining initially
@@ -330,6 +379,10 @@ def serve(path):
 
     norm_current_path = os.path.normpath(relative_path_unquoted.strip('/'))
     if norm_current_path == '.': norm_current_path = '' # Normalize root path
+
+    # Check if the current path itself is hidden
+    if norm_current_path: # Root cannot be hidden
+        is_current_path_hidden = norm_current_path in HIDDEN_PATHS
 
     required_key = get_required_key_for_path(norm_current_path)
     has_session_access = False # Assume no access yet if key is required
@@ -431,6 +484,10 @@ def serve(path):
                     abs_path = os.path.normpath(os.path.join(PUBLIC_DIR, rel_path))
                     # Basic safety/existence check
                     if not check_path_safety(abs_path) or not os.path.exists(abs_path): continue
+                    
+                    # Also check if hidden
+                    if os.path.normpath(rel_path) in HIDDEN_PATHS: continue
+
                     if rel_path not in temp_entries:
                         info = format_info(abs_path, rel_path) # format_info adds is_protected
                         if not info['error']:
@@ -442,6 +499,7 @@ def serve(path):
                 # Add filename results not already present
                 for rel_path, item_data in filename_results_map.items():
                      if rel_path not in temp_entries:
+                          # The find_files_by_name function already filters hidden paths, so no need to check again here
                           abs_path = item_data['abs_path']
                           if not os.path.exists(abs_path) and not os.path.islink(abs_path): continue
                           info = format_info(abs_path, rel_path)
@@ -496,6 +554,10 @@ def serve(path):
                          ent_path_rel = os.path.normpath(os.path.join(norm_current_path, name)).strip('/')
                          if ent_path_rel == '.': ent_path_rel = '' # Handle case where join results in '.'
 
+                         # --- Check if Hidden ---
+                         if ent_path_rel in HIDDEN_PATHS:
+                             continue
+
                          if ent_path_rel not in entries: # Should not happen with listdir, but safe check
                             info = format_info(ent_path_abs, ent_path_rel) # format_info adds is_protected
                             if not info['error']:
@@ -531,7 +593,9 @@ def serve(path):
             semantic_search_enabled=MODEL_LOADED,
             permission_denied=permission_denied, # Pass denied status
             current_path=norm_current_path, # Pass normalized, unquoted path
-            delete_key_configured=DELETE_KEY_CONFIGURED # Pass delete key status
+            delete_key_configured=DELETE_KEY_CONFIGURED, # Pass delete key status
+            hidden_key_configured=HIDDEN_KEY_CONFIGURED,
+            is_current_path_hidden=is_current_path_hidden
         )
     else:
         # Path exists, is safe, but not a file or directory? Unexpected.
@@ -727,6 +791,11 @@ def api_list_dirs():
                  # Calculate relative path for the subdirectory to check its protection
                  # Use the normalized requested path as the base for joining
                 item_rel_path = os.path.normpath(os.path.join(norm_relative_req_path, name))
+                
+                # Check if the subdirectory is hidden
+                if item_rel_path in HIDDEN_PATHS:
+                    continue
+
                 is_item_protected = bool(get_required_key_for_path(item_rel_path))
                 subdirs_data.append({
                      'name': name,
@@ -739,6 +808,55 @@ def api_list_dirs():
     return jsonify(subdirs=subdirs_data, current_path=norm_relative_req_path) # Return normalized path
 
 # --- End API Endpoint ---
+
+# --- API Endpoint to Toggle Folder Visibility ---
+@app.route('/api/toggle-hidden', methods=['POST'])
+def api_toggle_hidden():
+    """API endpoint to hide or unhide a folder."""
+    if not HIDDEN_KEY_CONFIGURED:
+        return jsonify(error="Hiding feature not configured on server."), 501
+
+    data = request.get_json()
+    if not data or 'path' not in data or 'key' not in data or 'hide' not in data:
+        return jsonify(error="Invalid request. Expected {'path': ..., 'key': ..., 'hide': bool}"), 400
+
+    provided_key = data['key']
+    if provided_key != HIDDEN_KEY:
+        print("API Toggle Hidden Unauthorized: Incorrect or missing HIDDEN_KEY.")
+        return jsonify(error="Unauthorized. Invalid key."), 401
+    
+    relative_path = data['path']
+    should_hide = data['hide']
+
+    norm_path = os.path.normpath(relative_path.strip('/'))
+    if norm_path == '.' or norm_path == '':
+        return jsonify(error="Cannot hide the root directory."), 400
+
+    # Safety check the path
+    abs_path = os.path.normpath(os.path.join(PUBLIC_DIR, norm_path))
+    if not check_path_safety(abs_path) or not os.path.isdir(abs_path):
+        return jsonify(error="Path is invalid, not a directory, or outside public scope."), 404
+
+    global HIDDEN_PATHS
+    if should_hide:
+        HIDDEN_PATHS.add(norm_path)
+        action = "hidden"
+    else:
+        HIDDEN_PATHS.discard(norm_path)
+        action = "unhidden"
+
+    if save_hidden_paths():
+        print(f"Path '{norm_path}' successfully {action}.")
+        # A full implementation might trigger a targeted re-index or cache clear.
+        return jsonify(status="success", message=f"Folder '{norm_path}' is now {action}.", path=norm_path, is_hidden=should_hide), 200
+    else:
+        # Revert change if save fails
+        if should_hide:
+            HIDDEN_PATHS.discard(norm_path)
+        else:
+            HIDDEN_PATHS.add(norm_path)
+        return jsonify(error="Failed to save visibility state."), 500
+
 
 # --- API Endpoint for Deleting Items ---
 @app.route('/api/delete-items', methods=['POST'])
@@ -858,6 +976,7 @@ if __name__ == "__main__":
     elif MODEL_LOADED:
          print(f"Semantic index loaded with {SEMANTIC_INDEX_DATA.get('embeddings', np.array([])).shape[0]} embeddings.")
     print(f"Delete Key Configured: {DELETE_KEY_CONFIGURED}") # Log delete key status
+    print(f"Hidden Key Configured: {HIDDEN_KEY_CONFIGURED}") # Log hidden key status
     if app.secret_key == "dev-insecure-fallback-key":
         print("!!! Flask Session Secret Key is INSECURE !!!")
     print("-" * 50)
