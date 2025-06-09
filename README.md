@@ -108,12 +108,12 @@ Example CURL:
   # Hide the 'images' folder
   curl -X POST http://localhost:8000/api/toggle-hidden \
        -H "Content-Type: application/json" \
-       -d '{"path": "images", "key": "rushihide", "hide": true}'
+       -d '{"path": "images", "key": "HIDE_KEY", "hide": true}'
 
   # Unhide the 'images' folder
   curl -X POST http://localhost:8000/api/toggle-hidden \
        -H "Content-Type: application/json" \
-       -d '{"path": "images", "key": "rushihide", "hide": false}'
+       -d '{"path": "images", "key": "HIDE_KEY", "hide": false}'
 ```
 
 ### System Endpoints
